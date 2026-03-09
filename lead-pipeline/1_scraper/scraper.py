@@ -153,6 +153,13 @@ def extract_card_data(card):
         "city": config.SEARCH_LOCATION,
         "category": config.SEARCH_CATEGORY,
         "has_website": False,
+        "description": "",
+        "specialties": "",
+        "hours": "",
+        "zone": "",
+        "year_created": "",
+        "review_score": "",
+        "review_count": "",
     }
 
     # --- Business name ---
@@ -237,25 +244,45 @@ def _is_real_email(email):
     return True
 
 
-def fetch_email_from_detail_page(driver, detail_url, business_name):
+def fetch_detail_page_info(driver, detail_url, business_name):
     """
-    Visits a business's detail page on PagesJaunes to find their email.
+    Visits a business's detail page on PagesJaunes to extract ALL useful info.
 
-    KEY CONCEPT — Detail Pages:
-      PagesJaunes only shows emails on individual business pages, not on
-      search results. We visit each page and look for:
-      1. mailto: links (direct email links)
-      2. Email patterns in the page HTML (regex fallback)
-      3. "E-mail" buttons that reveal the email when clicked
+    KEY CONCEPT — Data Enrichment:
+      PagesJaunes detail pages contain much more than just an email.
+      We extract everything useful so DeepSeek can generate a better,
+      more personalized website with real data (hours, specialties, etc.).
 
-    Returns the email string, or "" if not found.
+    Extracts:
+      - email:        Business email address
+      - description:  Presentation text written by the business
+      - specialties:  List of specialties/services offered
+      - hours:        Opening hours
+      - zone:         Zone of intervention
+      - year_created: Year the business was established
+      - review_score: Average review rating (e.g. "4.5/5")
+      - review_count: Number of reviews
+
+    Returns a dict with all extracted fields (empty strings if not found).
     """
+    info = {
+        "email": "",
+        "description": "",
+        "specialties": "",
+        "hours": "",
+        "zone": "",
+        "year_created": "",
+        "review_score": "",
+        "review_count": "",
+    }
+
     try:
         driver.get(detail_url)
         time.sleep(1.5)
 
         dismiss_cookie_popup(driver)
 
+        # ── EMAIL ──
         # Method 1: Click any "E-mail" / "Afficher" email buttons
         email_buttons = driver.find_elements(By.CSS_SELECTOR,
             "a[title*='mail'], a[title*='Mail'], button[class*='mail'], "
@@ -274,28 +301,124 @@ def fetch_email_from_detail_page(driver, detail_url, business_name):
             href = mailto_el.get_attribute("href") or ""
             email = href.replace("mailto:", "").split("?")[0].strip()
             if email and _is_real_email(email):
-                return email
+                info["email"] = email
         except Exception:
             pass
 
         # Method 3: Regex scan of page for email patterns
-        page_html = driver.page_source
-        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page_html)
-        for email in emails:
-            if _is_real_email(email):
-                return email
+        if not info["email"]:
+            page_html = driver.page_source
+            emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page_html)
+            for email in emails:
+                if _is_real_email(email):
+                    info["email"] = email
+                    break
+
+        # ── DESCRIPTION / PRESENTATION ──
+        # PagesJaunes shows a "Présentation" or description block
+        for selector in [".bloc-description p", ".description-pro p",
+                         ".teaser-presentation", "[class*='description'] p",
+                         ".pres-text", ".bi-description"]:
+            try:
+                desc_els = driver.find_elements(By.CSS_SELECTOR, selector)
+                texts = [el.text.strip() for el in desc_els if el.text.strip()]
+                if texts:
+                    info["description"] = " ".join(texts)[:500]  # Cap at 500 chars
+                    break
+            except Exception:
+                pass
+
+        # ── SPECIALTIES / ACTIVITÉS ──
+        # Usually listed as tags or bullet points
+        for selector in [".activite-list li", ".tags-activite span",
+                         ".liste-activites li", "[class*='activit'] li",
+                         ".denomination-activite", ".bi-activities li"]:
+            try:
+                spec_els = driver.find_elements(By.CSS_SELECTOR, selector)
+                specs = [el.text.strip() for el in spec_els if el.text.strip()]
+                if specs:
+                    info["specialties"] = ", ".join(specs[:10])  # Max 10
+                    break
+            except Exception:
+                pass
+
+        # ── OPENING HOURS (HORAIRES) ──
+        for selector in [".horaire-ouvert", ".liste-horaires",
+                         "[class*='horaire']", ".opening-hours",
+                         ".bi-horaires"]:
+            try:
+                hours_els = driver.find_elements(By.CSS_SELECTOR, selector)
+                hours_texts = [el.text.strip() for el in hours_els if el.text.strip()]
+                if hours_texts:
+                    info["hours"] = " | ".join(hours_texts)[:300]
+                    break
+            except Exception:
+                pass
+
+        # ── ZONE D'INTERVENTION ──
+        for selector in [".zone-intervention", "[class*='zone']",
+                         ".bi-zone"]:
+            try:
+                zone_el = driver.find_element(By.CSS_SELECTOR, selector)
+                zone_text = zone_el.text.strip()
+                if zone_text and len(zone_text) > 3:
+                    info["zone"] = zone_text[:200]
+                    break
+            except Exception:
+                pass
+
+        # ── YEAR CREATED / ANCIENNETÉ ──
+        try:
+            page_text = driver.find_element(By.TAG_NAME, "body").text
+            # Look for patterns like "Créée en 2005" or "Depuis 1998"
+            year_match = re.search(r'(?:créé|fondé|depuis|établi|existant|en activité)[e]?\s+(?:en\s+)?(\d{4})',
+                                   page_text, re.IGNORECASE)
+            if year_match:
+                info["year_created"] = year_match.group(1)
+        except Exception:
+            pass
+
+        # ── REVIEWS / AVIS ──
+        for selector in [".note-global", ".rating-score",
+                         "[class*='note']", "[class*='rating']"]:
+            try:
+                review_el = driver.find_element(By.CSS_SELECTOR, selector)
+                score_text = review_el.text.strip()
+                # Extract score like "4.5" or "4,5/5"
+                score_match = re.search(r'(\d[,.]?\d?)\s*/\s*5', score_text)
+                if score_match:
+                    info["review_score"] = score_match.group(1).replace(",", ".")
+                elif re.match(r'^\d[,.]?\d?$', score_text):
+                    info["review_score"] = score_text.replace(",", ".")
+                break
+            except Exception:
+                pass
+
+        # Review count
+        for selector in [".nb-avis", "[class*='avis'] .count",
+                         "[class*='review'] .count"]:
+            try:
+                count_el = driver.find_element(By.CSS_SELECTOR, selector)
+                count_match = re.search(r'(\d+)', count_el.text)
+                if count_match:
+                    info["review_count"] = count_match.group(1)
+                    break
+            except Exception:
+                pass
 
     except Exception as e:
         print(f"      ⚠ Error visiting detail page: {e}")
 
-    return ""
+    return info
 
 
 def save_leads(leads, filepath):
     """Saves the leads list to a CSV file."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
-    fieldnames = ["name", "phone", "email", "address", "city", "category"]
+    fieldnames = ["name", "phone", "email", "address", "city", "category",
+                   "description", "specialties", "hours", "zone",
+                   "year_created", "review_score", "review_count"]
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -356,15 +479,39 @@ def run():
         # ── PHASE 2: Visit detail pages to find emails ──
         leads_with_detail = [l for l in all_leads if l.get("detail_url")]
         if leads_with_detail:
-            print(f"\n📧 Visiting {len(leads_with_detail)} detail pages to find emails...")
+            print(f"\n📧 Visiting {len(leads_with_detail)} detail pages for emails + extra info...")
             for i, lead in enumerate(leads_with_detail, 1):
                 print(f"   [{i}/{len(leads_with_detail)}] {lead['name']}...", end=" ")
-                email = fetch_email_from_detail_page(driver, lead["detail_url"], lead["name"])
-                if email:
-                    lead["email"] = email
-                    print(f"✅ {email}")
+                detail_info = fetch_detail_page_info(driver, lead["detail_url"], lead["name"])
+
+                # Merge all extracted info into the lead
+                lead["email"] = detail_info["email"]
+                lead["description"] = detail_info["description"]
+                lead["specialties"] = detail_info["specialties"]
+                lead["hours"] = detail_info["hours"]
+                lead["zone"] = detail_info["zone"]
+                lead["year_created"] = detail_info["year_created"]
+                lead["review_score"] = detail_info["review_score"]
+                lead["review_count"] = detail_info["review_count"]
+
+                # Show what we found
+                found = []
+                if detail_info["email"]:
+                    found.append(f"email={detail_info['email']}")
+                if detail_info["specialties"]:
+                    found.append("specialties")
+                if detail_info["hours"]:
+                    found.append("hours")
+                if detail_info["description"]:
+                    found.append("description")
+                if detail_info["review_score"]:
+                    found.append(f"rating={detail_info['review_score']}/5")
+
+                if found:
+                    print(f"✅ {', '.join(found)}")
                 else:
-                    print("❌ no email")
+                    print("⚠ basic info only")
+
                 # Be polite between requests
                 time.sleep(1.5)
         else:

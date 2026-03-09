@@ -47,6 +47,7 @@ INFORMATIONS DU PROFESSIONNEL:
 - Ville: {city}
 - Adresse: {address}
 - Téléphone: {phone}
+{extra_info}
 
 INSTRUCTIONS DE DESIGN:
 1. Crée un design UNIQUE à chaque fois — varie les couleurs, les dispositions, les styles
@@ -110,12 +111,37 @@ def ask_deepseek(lead):
 
     Returns the full HTML string, or None on error.
     """
+    # Build extra info block from enriched data (only include non-empty fields)
+    extra_lines = []
+    if lead.get("description"):
+        extra_lines.append(f"- Description du professionnel: {lead['description']}")
+    if lead.get("specialties"):
+        extra_lines.append(f"- Spécialités: {lead['specialties']}")
+    if lead.get("hours"):
+        extra_lines.append(f"- Horaires d'ouverture: {lead['hours']}")
+    if lead.get("zone"):
+        extra_lines.append(f"- Zone d'intervention: {lead['zone']}")
+    if lead.get("year_created"):
+        extra_lines.append(f"- Année de création: {lead['year_created']}")
+    if lead.get("review_score"):
+        score = lead["review_score"]
+        count = lead.get("review_count", "")
+        review_text = f"- Note clients: {score}/5"
+        if count:
+            review_text += f" ({count} avis)"
+        extra_lines.append(review_text)
+
+    extra_info = "\n".join(extra_lines)
+    if extra_info:
+        extra_info = "\nINFORMATIONS SUPPLÉMENTAIRES (utilise-les dans le site):\n" + extra_info
+
     prompt = MASTER_PROMPT.format(
         name=lead["name"],
         category=lead.get("category", "artisan"),
         city=lead.get("city", ""),
         address=lead.get("address", ""),
         phone=lead.get("phone", ""),
+        extra_info=extra_info,
     )
 
     try:
