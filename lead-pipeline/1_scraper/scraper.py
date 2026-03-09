@@ -163,17 +163,22 @@ def extract_card_data(card):
         pass
 
     # --- Detail page URL ---
-    # The business name link contains data-pjlb='{"url":"BASE64_ENCODED_PATH",...}'
-    # We decode this to get the path to the detail page.
+    # The business name is a link (<a class="bi-denomination">) whose href
+    # points to the detail page (e.g. /pros/detail?code=...).
+    # Fallback: try data-pjlb attribute which contains a base64-encoded URL.
     try:
         link_el = card.find_element(By.CSS_SELECTOR, "a.bi-denomination")
-        pjlb = link_el.get_attribute("data-pjlb") or ""
-        # Extract the base64 URL from the JSON-like attribute
-        url_match = re.search(r'"url"\s*:\s*"([^"]+)"', pjlb)
-        if url_match:
-            encoded = url_match.group(1)
-            decoded_path = base64.b64decode(encoded).decode("utf-8")
-            info["detail_url"] = "https://www.pagesjaunes.fr" + decoded_path
+        href = link_el.get_attribute("href") or ""
+        if href and "/pros/" in href:
+            info["detail_url"] = href
+        else:
+            # Fallback: decode base64 URL from data-pjlb attribute
+            pjlb = link_el.get_attribute("data-pjlb") or ""
+            url_match = re.search(r'"url"\s*:\s*"([^"]+)"', pjlb)
+            if url_match:
+                encoded = url_match.group(1)
+                decoded_path = base64.b64decode(encoded).decode("utf-8")
+                info["detail_url"] = "https://www.pagesjaunes.fr" + decoded_path
     except Exception:
         pass
 
