@@ -3,26 +3,26 @@ SCRAPER — Finds businesses on PagesJaunes that have NO website.
 
 HOW IT WORKS:
   1. Opens a real Chrome browser (invisible, in the background)
-  2. Navigates to pagesjaunes.fr and searches for businesses
+  2. Searches pagesjaunes.fr for businesses in your category/location
   3. Clicks "Afficher le N°" buttons to reveal hidden phone numbers
-  4. Extracts: name, phone, address for each business
-  5. Keeps ONLY businesses that have NO website
-  6. Saves everything to data/leads.csv
+  4. Filters out businesses that already have a website
+  5. For each remaining business, visits their DETAIL PAGE to find email
+  6. Saves results to data/leads.csv
+
+WHY TWO STEPS (search page → detail page)?
+  PagesJaunes shows limited info on search results. Emails are only
+  visible on individual business detail pages, not on the search list.
 
 WHY SELENIUM (not simple HTTP requests)?
   PagesJaunes blocks simple HTTP requests (returns 403 Forbidden).
   Selenium launches a REAL browser, so the website thinks a human is browsing.
-
-WHY CLICK PHONE BUTTONS?
-  PagesJaunes hides phone numbers behind "Afficher le N°" buttons.
-  The number only appears in the HTML after clicking. Same concept as
-  a "Show phone number" button on any website.
 """
 
 import csv
 import os
 import re
 import time
+import base64
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -37,27 +37,15 @@ import config
 
 
 def build_url(category, location, page=1):
-    """
-    Builds the PagesJaunes search URL.
-
-    Example result:
-      https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=plombier&ou=Paris&page=1
-    """
+    """Builds the PagesJaunes search URL."""
     base = "https://www.pagesjaunes.fr/annuaire/chercherlespros"
     return f"{base}?quoiqui={category}&ou={location}&page={page}"
 
 
 def create_browser():
-    """
-    Creates an invisible Chrome browser.
-
-    KEY CONCEPT — Headless Browser:
-      "Headless" means the browser window is invisible. Chrome loads the page
-      exactly like normal, but without showing anything on screen.
-      The website sees a real browser visit, not a script.
-    """
+    """Creates an invisible Chrome browser."""
     chrome_options = Options()
-    chrome_options.add_argument("--headless=new")  # Invisible mode
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--window-size=1920,1080")
@@ -74,7 +62,6 @@ def create_browser():
     except Exception as e:
         print(f"\n❌ Could not start Chrome browser: {e}")
         print("\nTo fix this, make sure Google Chrome is installed on your PC.")
-        print("Selenium will automatically download ChromeDriver for you.")
         return None
 
 
@@ -87,17 +74,18 @@ def dismiss_cookie_popup(driver):
         cookie_btn.click()
         time.sleep(0.5)
     except Exception:
-        pass  # No cookie popup
+        pass
 
 
-def scrape_page(url, driver, page_num):
+def scrape_search_page(url, driver, page_num):
     """
-    Scrapes ONE page of PagesJaunes results using Selenium.
+    Scrapes ONE page of PagesJaunes search results.
 
-    KEY CONCEPT — Dynamic Content:
-      PagesJaunes hides phone numbers behind "Afficher le N°" buttons.
-      We must click each button, then read the revealed number from
-      a hidden <div> that becomes visible.
+    For each business card, extracts:
+      - name, phone, address, detail_url, has_website
+
+    Phone numbers are hidden behind "Afficher le N°" buttons, so we
+    click them all first, then extract the revealed numbers.
 
     Returns a list of business dicts.
     """
@@ -107,33 +95,21 @@ def scrape_page(url, driver, page_num):
         print(f"  ⚠ Browser error loading page: {e}")
         return []
 
-    # Handle cookie popup FIRST (it can block the page content)
     dismiss_cookie_popup(driver)
 
-    # Wait for business cards to appear
-    card_selector = "li.bi"
+    # Wait for business cards
     try:
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, card_selector))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "li.bi"))
         )
     except Exception:
         print("  ⚠ No results found on this page (timeout)")
-        debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-        os.makedirs(debug_dir, exist_ok=True)
-        driver.save_screenshot(os.path.join(debug_dir, f"debug_page{page_num}.png"))
-        with open(os.path.join(debug_dir, f"debug_page{page_num}.html"), "w", encoding="utf-8") as f:
-            f.write(driver.page_source)
-        print(f"  📸 Debug files saved to data/")
         return []
 
-    # Find all business cards
-    cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
+    cards = driver.find_elements(By.CSS_SELECTOR, "li.bi")
     print(f"   Found {len(cards)} business cards")
 
-    # --- Step 1: Click ALL "Afficher le N°" buttons to reveal phone numbers ---
-    # KEY CONCEPT: PagesJaunes hides phone numbers. Each card has a button
-    # with class "btn_tel". Clicking it reveals a hidden div (class "bi-fantomas")
-    # containing the actual phone number inside ".number-contact".
+    # Click ALL "Afficher le N°" buttons to reveal phone numbers
     phone_buttons = driver.find_elements(By.CSS_SELECTOR, "button.btn_tel")
     if phone_buttons:
         print(f"   📞 Clicking {len(phone_buttons)} phone buttons...")
@@ -147,7 +123,7 @@ def scrape_page(url, driver, page_num):
                 pass
         time.sleep(0.5)
 
-    # --- Step 2: Extract data from each card ---
+    # Extract data from each card
     results = []
     for card in cards:
         info = extract_card_data(card)
@@ -159,96 +135,137 @@ def scrape_page(url, driver, page_num):
 
 def extract_card_data(card):
     """
-    Extracts business info from ONE card element using Selenium.
+    Extracts business info from ONE search result card.
 
-    The actual PagesJaunes HTML structure (as of 2025):
-      - Name:    <h3> inside <a class="bi-denomination">
-      - Address: <div class="bi-address"> containing an <a> with the text
-      - Phone:   <div class="bi-fantomas"> > <div class="number-contact">
-                 (only visible after clicking "Afficher le N°")
-      - Website: <a> with "site internet" or "website" in the link
+    PagesJaunes HTML structure:
+      - Name:       <h3> inside <a class="bi-denomination">
+      - Phone:      .bi-fantomas .number-contact (after clicking button)
+      - Address:    .bi-address (strip "Voir le plan")
+      - Detail URL: <a class="bi-denomination"> has data-pjlb with base64 URL
+      - Website:    check for "site internet" text in card HTML
     """
     info = {
         "name": "",
         "phone": "",
         "email": "",
         "address": "",
+        "detail_url": "",
         "city": config.SEARCH_LOCATION,
         "category": config.SEARCH_CATEGORY,
         "has_website": False,
     }
 
-    # --- Business name (inside h3 within .bi-denomination link) ---
+    # --- Business name ---
     try:
         name_el = card.find_element(By.CSS_SELECTOR, "h3")
         info["name"] = name_el.text.strip()
     except Exception:
         pass
 
+    # --- Detail page URL ---
+    # The business name link contains data-pjlb='{"url":"BASE64_ENCODED_PATH",...}'
+    # We decode this to get the path to the detail page.
+    try:
+        link_el = card.find_element(By.CSS_SELECTOR, "a.bi-denomination")
+        pjlb = link_el.get_attribute("data-pjlb") or ""
+        # Extract the base64 URL from the JSON-like attribute
+        url_match = re.search(r'"url"\s*:\s*"([^"]+)"', pjlb)
+        if url_match:
+            encoded = url_match.group(1)
+            decoded_path = base64.b64decode(encoded).decode("utf-8")
+            info["detail_url"] = "https://www.pagesjaunes.fr" + decoded_path
+    except Exception:
+        pass
+
     # --- Phone number (revealed after clicking "Afficher le N°") ---
-    # The phone appears in: <div class="bi-fantomas"><div class="number-contact">
-    # Text looks like: "Tél : 01 84 83 14 68"
     try:
         phone_el = card.find_element(By.CSS_SELECTOR, ".number-contact")
         phone_text = phone_el.text.strip()
-        # Extract just the number: remove "Tél :" prefix
         phone_clean = re.sub(r'^.*?:\s*', '', phone_text).strip()
         if phone_clean:
             info["phone"] = phone_clean
     except Exception:
         pass
 
-    # --- Address (inside .bi-address) ---
-    # Text looks like: "3 rue Janssen 75019 Paris\nVoir le plan"
+    # --- Address ---
     try:
         addr_el = card.find_element(By.CSS_SELECTOR, ".bi-address")
         addr_text = addr_el.text.strip()
-        # Remove "Voir le plan" suffix
         addr_text = addr_text.replace("Voir le plan", "").strip()
         info["address"] = addr_text
     except Exception:
         pass
 
     # --- Website detection ---
-    # Paid listings have website links. We look for any link containing
-    # "site internet" or website-related attributes.
     try:
-        # Check for site internet link in the card's actions
         card_html = card.get_attribute("innerHTML").lower()
         if "site internet" in card_html or "bi-website" in card_html or "visiter le site" in card_html:
             info["has_website"] = True
     except Exception:
         pass
 
-    # --- Email (rare on search results, but check anyway) ---
-    try:
-        email_el = card.find_element(By.CSS_SELECTOR, "a[href^='mailto:']")
-        href = email_el.get_attribute("href") or ""
-        info["email"] = href.replace("mailto:", "").strip()
-    except Exception:
-        pass
-
-    # Regex fallback for email
-    if not info["email"]:
-        try:
-            card_html = card.get_attribute("innerHTML")
-            email_match = re.search(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', card_html)
-            if email_match:
-                info["email"] = email_match.group(0)
-        except Exception:
-            pass
-
     return info
 
 
-def save_leads(leads, filepath):
+def fetch_email_from_detail_page(driver, detail_url, business_name):
     """
-    Saves the leads list to a CSV file.
+    Visits a business's detail page on PagesJaunes to find their email.
 
-    KEY CONCEPT — CSV:
-      CSV = "Comma-Separated Values". It's the simplest spreadsheet format.
-      You can open it in Excel, Google Sheets, or any text editor.
+    KEY CONCEPT — Detail Pages:
+      PagesJaunes only shows emails on individual business pages, not on
+      search results. We visit each page and look for:
+      1. mailto: links (direct email links)
+      2. Email patterns in the page HTML (regex fallback)
+      3. "E-mail" buttons that reveal the email when clicked
+
+    Returns the email string, or "" if not found.
     """
+    try:
+        driver.get(detail_url)
+        time.sleep(1.5)
+
+        dismiss_cookie_popup(driver)
+
+        # Method 1: Click any "E-mail" / "Afficher" email buttons
+        email_buttons = driver.find_elements(By.CSS_SELECTOR,
+            "a[title*='mail'], a[title*='Mail'], button[class*='mail'], "
+            "a[data-pjstats*='EMAIL'], a[data-pjstats*='MAIL']"
+        )
+        for btn in email_buttons:
+            try:
+                driver.execute_script("arguments[0].click();", btn)
+                time.sleep(0.5)
+            except Exception:
+                pass
+
+        # Method 2: Look for mailto: links
+        try:
+            mailto_el = driver.find_element(By.CSS_SELECTOR, "a[href^='mailto:']")
+            href = mailto_el.get_attribute("href") or ""
+            email = href.replace("mailto:", "").split("?")[0].strip()
+            if email:
+                return email
+        except Exception:
+            pass
+
+        # Method 3: Regex scan of page for email patterns
+        page_html = driver.page_source
+        # Look for email addresses, excluding common false positives
+        emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page_html)
+        # Filter out PagesJaunes internal emails and tracking pixels
+        for email in emails:
+            lower = email.lower()
+            if "pagesjaunes" not in lower and "solocal" not in lower and "didomi" not in lower:
+                return email
+
+    except Exception as e:
+        print(f"      ⚠ Error visiting detail page: {e}")
+
+    return ""
+
+
+def save_leads(leads, filepath):
+    """Saves the leads list to a CSV file."""
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
     fieldnames = ["name", "phone", "email", "address", "city", "category"]
@@ -266,6 +283,12 @@ def save_leads(leads, filepath):
 def run():
     """
     Main function — runs the full scraping process.
+
+    FLOW:
+      1. Search PagesJaunes for businesses
+      2. Filter: keep only those WITHOUT a website
+      3. For each one, visit their detail page to find email
+      4. Save all leads to CSV
     """
     print("=" * 50)
     print(f"🔍 Searching PagesJaunes for: {config.SEARCH_CATEGORY}")
@@ -281,31 +304,50 @@ def run():
     all_leads = []
 
     try:
+        # ── PHASE 1: Collect businesses from search results ──
         for page_num in range(1, config.MAX_PAGES + 1):
             url = build_url(config.SEARCH_CATEGORY, config.SEARCH_LOCATION, page_num)
             print(f"\n📄 Scraping page {page_num}/{config.MAX_PAGES}...")
             print(f"   URL: {url}")
 
-            page_results = scrape_page(url, driver, page_num)
+            page_results = scrape_search_page(url, driver, page_num)
 
-            # Keep ALL businesses without a website (even if no email)
-            # These are our potential clients — they need a website!
+            # Keep only businesses WITHOUT a website
             qualified = [biz for biz in page_results if not biz["has_website"]]
-            with_email = [biz for biz in qualified if biz["email"]]
             with_phone = [biz for biz in qualified if biz["phone"]]
 
-            print(f"   📊 {len(qualified)} without website, {len(with_phone)} with phone, {len(with_email)} with email")
+            print(f"   📊 {len(qualified)} without website, {len(with_phone)} with phone")
             all_leads.extend(qualified)
 
-            # Be polite: wait between requests
             if page_num < config.MAX_PAGES:
-                print("   ⏳ Waiting 2 seconds before next page...")
+                print("   ⏳ Waiting 2 seconds...")
                 time.sleep(2)
+
+        print(f"\n{'=' * 50}")
+        print(f"📊 Found {len(all_leads)} businesses without a website")
+
+        # ── PHASE 2: Visit detail pages to find emails ──
+        leads_with_detail = [l for l in all_leads if l.get("detail_url")]
+        if leads_with_detail:
+            print(f"\n📧 Visiting {len(leads_with_detail)} detail pages to find emails...")
+            for i, lead in enumerate(leads_with_detail, 1):
+                print(f"   [{i}/{len(leads_with_detail)}] {lead['name']}...", end=" ")
+                email = fetch_email_from_detail_page(driver, lead["detail_url"], lead["name"])
+                if email:
+                    lead["email"] = email
+                    print(f"✅ {email}")
+                else:
+                    print("❌ no email")
+                # Be polite between requests
+                time.sleep(1.5)
+        else:
+            print("\n⚠ No detail page URLs found — cannot search for emails")
+
     finally:
-        # Always close the browser, even if an error occurs
         driver.quit()
         print("\n🌐 Browser closed.")
 
+    # ── PHASE 3: Summary & Save ──
     print(f"\n{'=' * 50}")
     print(f"📊 Total leads (no website): {len(all_leads)}")
     with_email_total = sum(1 for l in all_leads if l["email"])
@@ -317,7 +359,6 @@ def run():
         save_leads(all_leads, config.LEADS_CSV)
     else:
         print("\n⚠ No leads found.")
-        print("   Check the debug screenshots in data/ folder to see what the page looks like.")
 
     return all_leads
 
