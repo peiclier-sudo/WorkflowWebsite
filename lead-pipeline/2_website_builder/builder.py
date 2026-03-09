@@ -1,27 +1,29 @@
 """
-WEBSITE BUILDER — Generates personalized websites for each lead.
+WEBSITE BUILDER — Generates unique, fully-designed websites for each lead.
 
 HOW IT WORKS:
   1. Reads leads from data/leads.csv
-  2. For each lead, asks DeepSeek AI to generate website content:
-     - Tagline, services list, about text, color scheme
-  3. Fills in the HTML template with that content
-  4. Saves each website as data/sites/{business_name}/index.html
+  2. For each lead, asks DeepSeek AI to generate a COMPLETE HTML page
+     with its own unique design, colors, layout, and CSS
+  3. Saves each website as data/sites/{business_name}/index.html
 
-KEY CONCEPT — One Template, Many Sites:
-  We use ONE HTML template (template.html) for every lead.
-  DeepSeek only generates the TEXT CONTENT (services, tagline, etc.).
-  This keeps websites consistent and professional while being personalized.
+KEY CONCEPT — AI-Generated Design:
+  Instead of filling a fixed template, DeepSeek creates the FULL page
+  each time: HTML structure, CSS styling, colors, fonts, layout.
+  Every business gets a unique-looking website.
+
+  We show DeepSeek a reference example so it understands the quality
+  level we expect, but it creates its OWN design each time.
 
 WHY DEEPSEEK (not ChatGPT)?
-  DeepSeek is much cheaper (~$0.001 per lead vs $0.02 for GPT-4).
-  For generating short text content, it works just as well.
+  DeepSeek is much cheaper (~$0.01 per lead vs $0.10 for GPT-4).
+  For generating HTML/CSS, it works great.
 """
 
 import csv
-import json
 import os
 import re
+import time
 
 import requests
 
@@ -31,43 +33,45 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
 
 
-# ── The prompt that tells DeepSeek what to generate ──
-# This is the "master prompt" — it defines exactly what content
-# DeepSeek must produce for each lead's website.
+# ── The master prompt ──
+# DeepSeek generates the ENTIRE HTML page with unique styling.
+# The reference template shows the quality level we expect.
 
-MASTER_PROMPT = """Tu es un rédacteur web expert pour les artisans et professionnels du bâtiment en France.
+MASTER_PROMPT = """Tu es un développeur web expert spécialisé dans la création de sites vitrines modernes et professionnels pour les artisans en France.
 
-Je te donne les informations d'un professionnel. Génère le contenu pour son site web vitrine.
+MISSION: Génère un site web vitrine COMPLET (HTML + CSS intégré) pour ce professionnel.
 
-Informations du professionnel:
-- Nom: {name}
-- Métier/Catégorie: {category}
+INFORMATIONS DU PROFESSIONNEL:
+- Nom de l'entreprise: {name}
+- Métier: {category}
 - Ville: {city}
 - Adresse: {address}
 - Téléphone: {phone}
 
-Réponds UNIQUEMENT avec un JSON valide (pas de texte avant/après) avec cette structure exacte:
-{{
-  "tagline": "Une phrase d'accroche courte et professionnelle (max 10 mots)",
-  "primary_color": "code hex couleur principale (adaptée au métier, ex: bleu pour plombier, orange pour electricien)",
-  "primary_dark": "version plus foncée de la couleur principale",
-  "accent_color": "couleur d'accent contrastante pour les boutons",
-  "services": [
-    {{"title": "Nom du service 1", "description": "Description courte du service (1-2 phrases)"}},
-    {{"title": "Nom du service 2", "description": "Description courte"}},
-    {{"title": "Nom du service 3", "description": "Description courte"}}
-  ],
-  "about_paragraphs": [
-    "Premier paragraphe de présentation (2-3 phrases, professionnel et rassurant)",
-    "Deuxième paragraphe sur l'expérience et la zone d'intervention"
-  ]
-}}
+INSTRUCTIONS DE DESIGN:
+1. Crée un design UNIQUE à chaque fois — varie les couleurs, les dispositions, les styles
+2. Le CSS doit être intégré dans une balise <style> (pas de fichier externe)
+3. Le site doit être responsive (mobile-friendly)
+4. Utilise des couleurs professionnelles adaptées au métier
+5. Inclus ces sections:
+   - Hero/header avec le nom, accroche, et bouton d'appel (lien tel:)
+   - Section services (3-4 services adaptés au métier)
+   - Section à propos (texte professionnel et rassurant)
+   - Section contact avec téléphone, adresse, zone d'intervention
+   - Footer
+6. Varie le style entre les sites:
+   - Parfois des cards arrondies, parfois des bordures strictes
+   - Parfois un gradient, parfois une couleur unie
+   - Parfois des ombres douces, parfois un style flat
+   - Varie la taille des polices, les espacements, la mise en page
+   - Utilise des combinaisons de couleurs différentes à chaque fois
+7. Le téléphone doit être cliquable (lien tel:)
+8. Ajoute des émojis pertinents pour le métier dans les titres de services
+9. Texte en français, ton professionnel mais chaleureux
+10. Mentionne la ville dans les textes
 
-IMPORTANT:
-- Adapte les services au métier spécifique (plombier → dépannage, installation, etc.)
-- Utilise un ton professionnel mais chaleureux
-- Mentionne la ville dans les textes
-- Les couleurs doivent être professionnelles et adaptées au métier
+IMPORTANT: Réponds UNIQUEMENT avec le code HTML complet. Pas de texte avant, pas de texte après.
+Commence directement par <!DOCTYPE html> et termine par </html>.
 """
 
 
@@ -89,12 +93,14 @@ def load_leads():
 
 def ask_deepseek(lead):
     """
-    Sends the lead info to DeepSeek and gets back website content.
+    Sends the lead info to DeepSeek and gets back a COMPLETE HTML page.
 
-    KEY CONCEPT — API Call:
-      We send a POST request to DeepSeek's API with our prompt.
-      DeepSeek returns JSON with the website content.
-      This is the same concept as ChatGPT's API, just cheaper.
+    KEY CONCEPT — Full Page Generation:
+      Unlike a template approach, DeepSeek generates the entire HTML+CSS.
+      Each site gets a unique design, layout, and color scheme.
+      The prompt guides the AI to create professional tradesman sites.
+
+    Returns the full HTML string, or None on error.
     """
     prompt = MASTER_PROMPT.format(
         name=lead["name"],
@@ -114,20 +120,32 @@ def ask_deepseek(lead):
             json={
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.7,
+                "temperature": 1.0,  # Higher = more creative/varied designs
+                "max_tokens": 4000,
             },
-            timeout=30,
+            timeout=60,
         )
         response.raise_for_status()
 
         data = response.json()
-        content = data["choices"][0]["message"]["content"].strip()
+        html_content = data["choices"][0]["message"]["content"].strip()
 
-        # DeepSeek sometimes wraps JSON in ```json ... ``` markdown
-        content = re.sub(r'^```json\s*', '', content)
-        content = re.sub(r'\s*```$', '', content)
+        # DeepSeek sometimes wraps HTML in ```html ... ``` markdown blocks
+        html_content = re.sub(r'^```html\s*', '', html_content)
+        html_content = re.sub(r'\s*```$', '', html_content)
 
-        return json.loads(content)
+        # Validate: must start with <!DOCTYPE or <html
+        if not html_content.lower().startswith(("<!doctype", "<html")):
+            print(f"   ⚠ Response doesn't look like HTML, trying to extract...")
+            # Try to extract HTML from the response
+            match = re.search(r'(<!DOCTYPE html.*</html>)', html_content, re.DOTALL | re.IGNORECASE)
+            if match:
+                html_content = match.group(1)
+            else:
+                print(f"   ❌ Could not extract HTML from response")
+                return None
+
+        return html_content
 
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 401:
@@ -135,66 +153,9 @@ def ask_deepseek(lead):
         else:
             print(f"   ❌ DeepSeek API error: {e}")
         return None
-    except json.JSONDecodeError:
-        print(f"   ❌ DeepSeek returned invalid JSON")
-        print(f"      Raw response: {content[:200]}")
-        return None
     except Exception as e:
         print(f"   ❌ Error calling DeepSeek: {e}")
         return None
-
-
-def build_services_html(services):
-    """
-    Converts the services list from DeepSeek into HTML cards.
-
-    Input:  [{"title": "Dépannage", "description": "Intervention rapide..."}]
-    Output: <div class="service-card"><h3>Dépannage</h3><p>Intervention...</p></div>
-    """
-    html = ""
-    for svc in services:
-        title = svc.get("title", "Service")
-        desc = svc.get("description", "")
-        html += f'            <div class="service-card">\n'
-        html += f'                <h3>{title}</h3>\n'
-        html += f'                <p>{desc}</p>\n'
-        html += f'            </div>\n'
-    return html
-
-
-def build_about_html(paragraphs):
-    """Converts about paragraphs into HTML <p> tags."""
-    return "\n".join(f"            <p>{p}</p>" for p in paragraphs)
-
-
-def fill_template(template_str, lead, ai_content):
-    """
-    Replaces all {{PLACEHOLDER}} markers in the template with real content.
-
-    This is the core of the system: ONE template + personalized text = unique site.
-    """
-    phone_raw = lead.get("phone", "").replace(" ", "")
-    phone_display = lead.get("phone", "Non renseigné")
-
-    replacements = {
-        "{{BUSINESS_NAME}}": lead["name"],
-        "{{TAGLINE}}": ai_content.get("tagline", "Votre artisan de confiance"),
-        "{{PRIMARY_COLOR}}": ai_content.get("primary_color", "#2563eb"),
-        "{{PRIMARY_DARK}}": ai_content.get("primary_dark", "#1e40af"),
-        "{{ACCENT_COLOR}}": ai_content.get("accent_color", "#f59e0b"),
-        "{{PHONE}}": phone_raw,
-        "{{PHONE_DISPLAY}}": phone_display,
-        "{{ADDRESS}}": lead.get("address", ""),
-        "{{CITY}}": lead.get("city", ""),
-        "{{SERVICES_HTML}}": build_services_html(ai_content.get("services", [])),
-        "{{ABOUT_HTML}}": build_about_html(ai_content.get("about_paragraphs", [])),
-    }
-
-    html = template_str
-    for placeholder, value in replacements.items():
-        html = html.replace(placeholder, value)
-
-    return html
 
 
 def slugify(name):
@@ -212,15 +173,12 @@ def slugify(name):
 
 def run():
     """
-    Main function — generates a website for each lead.
+    Main function — generates a unique website for each lead.
 
     FLOW:
       1. Load leads from CSV
-      2. Load HTML template
-      3. For each lead:
-         a. Ask DeepSeek to generate content
-         b. Fill template with content
-         c. Save as HTML file
+      2. For each lead, ask DeepSeek to generate a full HTML page
+      3. Save each page as data/sites/{slug}/index.html
     """
     print("=" * 50)
     print("🏗️  WEBSITE BUILDER")
@@ -241,11 +199,6 @@ def run():
 
     print(f"\n📋 Found {len(leads)} leads in {config.LEADS_CSV}")
 
-    # Load template
-    template_path = os.path.join(os.path.dirname(__file__), "template.html")
-    with open(template_path, "r", encoding="utf-8") as f:
-        template_str = f.read()
-
     # Create output directory
     os.makedirs(config.SITES_DIR, exist_ok=True)
 
@@ -255,18 +208,18 @@ def run():
         name = lead["name"]
         print(f"\n[{i}/{len(leads)}] {name}")
 
-        # Ask DeepSeek to generate content
-        print(f"   🤖 Asking DeepSeek for content...")
-        ai_content = ask_deepseek(lead)
+        # Ask DeepSeek to generate the full website
+        print(f"   🤖 Generating unique website design...")
+        html = ask_deepseek(lead)
 
-        if not ai_content:
+        if not html:
             print(f"   ⏭️  Skipping (AI error)")
             continue
 
-        print(f"   ✅ Got: \"{ai_content.get('tagline', '?')}\"")
-
-        # Fill template
-        html = fill_template(template_str, lead, ai_content)
+        # Quick stats on what was generated
+        css_count = html.lower().count("style")
+        section_count = html.lower().count("<section")
+        print(f"   ✅ Generated ({len(html)} chars, {section_count} sections)")
 
         # Save to data/sites/{slug}/index.html
         slug = slugify(name)
@@ -277,16 +230,22 @@ def run():
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(html)
 
-        print(f"   💾 Saved to: {site_dir}/index.html")
+        print(f"   💾 Saved: {os.path.join('data', 'sites', slug, 'index.html')}")
 
         lead["site_folder"] = slug
         lead["site_path"] = output_path
         built_sites.append(lead)
 
+        # Small delay between API calls to be respectful
+        if i < len(leads):
+            time.sleep(1)
+
     # Summary
     print(f"\n{'=' * 50}")
     print(f"✅ Built {len(built_sites)}/{len(leads)} websites")
     print(f"📁 Sites saved in: {config.SITES_DIR}")
+    if built_sites:
+        print(f"\n💡 Open any index.html in your browser to preview!")
 
     return built_sites
 
