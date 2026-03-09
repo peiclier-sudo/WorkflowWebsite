@@ -16,7 +16,7 @@ HOW TO USE:
 SEARCH_CATEGORY = "plombier"
 
 # Where to search (city or department)
-SEARCH_LOCATION = "Paris"
+SEARCH_LOCATION = "Toulouse"
 
 # How many pages of results to scrape (each page ~ 20 businesses)
 MAX_PAGES = 10
