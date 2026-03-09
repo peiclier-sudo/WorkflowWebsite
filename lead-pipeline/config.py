@@ -28,6 +28,15 @@ MAX_PAGES = 10
 DEEPSEEK_API_KEY = ""  # Get from: platform.deepseek.com
 
 # ──────────────────────────────────────────────
+# GOOGLE ANALYTICS (Step 2b — optional)
+# ──────────────────────────────────────────────
+# Add your Google Analytics measurement ID to track visitors
+# Get it from: https://analytics.google.com → Admin → Data Streams
+# Format: "G-XXXXXXXXXX"
+
+GOOGLE_ANALYTICS_ID = ""  # e.g. "G-ABC123XYZ"
+
+# ──────────────────────────────────────────────
 # NETLIFY SETTINGS (Step 3 — not used yet)
 # ──────────────────────────────────────────────
 

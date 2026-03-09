@@ -53,12 +53,19 @@ INSTRUCTIONS DE DESIGN:
 2. Le CSS doit être intégré dans une balise <style> (pas de fichier externe)
 3. Le site doit être responsive (mobile-friendly)
 4. Utilise des couleurs professionnelles adaptées au métier
-5. Inclus ces sections:
+5. Inclus TOUTES ces sections:
    - Hero/header avec le nom, accroche, et bouton d'appel (lien tel:)
    - Section services (3-4 services adaptés au métier)
    - Section à propos (texte professionnel et rassurant)
+   - FORMULAIRE DE CONTACT avec champs: Nom, Email, Téléphone, Message, et bouton "Envoyer"
+     (utilise un <form> avec action="https://formsubmit.co/{phone}" method="POST" ou action="#" si pas d'email)
+     Style le formulaire de façon élégante et intégrée au design
    - Section contact avec téléphone, adresse, zone d'intervention
-   - Footer
+   - MENTIONS LÉGALES en bas de page (section ou modal):
+     Inclure: nom de l'entreprise, adresse, téléphone, mention "Site réalisé à titre informatif",
+     "Conformément à la loi Informatique et Libertés du 6 janvier 1978 modifiée,
+     vous disposez d'un droit d'accès, de modification et de suppression des données vous concernant."
+   - Footer avec copyright et lien vers mentions légales
 6. Varie le style entre les sites:
    - Parfois des cards arrondies, parfois des bordures strictes
    - Parfois un gradient, parfois une couleur unie
@@ -69,6 +76,7 @@ INSTRUCTIONS DE DESIGN:
 8. Ajoute des émojis pertinents pour le métier dans les titres de services
 9. Texte en français, ton professionnel mais chaleureux
 10. Mentionne la ville dans les textes
+11. Le formulaire doit avoir une validation HTML5 (required, type="email", etc.)
 
 IMPORTANT: Réponds UNIQUEMENT avec le code HTML complet. Pas de texte avant, pas de texte après.
 Commence directement par <!DOCTYPE html> et termine par </html>.
@@ -121,7 +129,7 @@ def ask_deepseek(lead):
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 1.0,  # Higher = more creative/varied designs
-                "max_tokens": 4000,
+                "max_tokens": 6000,
             },
             timeout=60,
         )
@@ -156,6 +164,38 @@ def ask_deepseek(lead):
     except Exception as e:
         print(f"   ❌ Error calling DeepSeek: {e}")
         return None
+
+
+def inject_google_analytics(html):
+    """
+    Injects Google Analytics tracking code into the <head> of the HTML.
+
+    We do this AFTER generation (not in the prompt) because:
+      - The GA ID comes from config, not from DeepSeek
+      - We want the exact correct snippet, not AI-generated JS
+      - If no GA ID is configured, we simply skip it
+    """
+    ga_id = getattr(config, "GOOGLE_ANALYTICS_ID", "")
+    if not ga_id:
+        return html
+
+    ga_snippet = f"""
+    <!-- Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id={ga_id}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){{dataLayer.push(arguments);}}
+      gtag('js', new Date());
+      gtag('config', '{ga_id}');
+    </script>"""
+
+    # Insert right after <head>
+    if "<head>" in html:
+        html = html.replace("<head>", f"<head>{ga_snippet}", 1)
+    elif "<HEAD>" in html:
+        html = html.replace("<HEAD>", f"<HEAD>{ga_snippet}", 1)
+
+    return html
 
 
 def slugify(name):
@@ -215,6 +255,9 @@ def run():
         if not html:
             print(f"   ⏭️  Skipping (AI error)")
             continue
+
+        # Inject Google Analytics tracking (if configured)
+        html = inject_google_analytics(html)
 
         # Quick stats on what was generated
         css_count = html.lower().count("style")
