@@ -106,27 +106,31 @@ def scrape_page(url, driver, page_num):
         print(f"  ⚠ Browser error loading page: {e}")
         return []
 
+    # Handle cookie popup FIRST (it can block the page content)
+    dismiss_cookie_popup(driver)
+
     # Wait for business cards to appear
+    # Try multiple selectors — PagesJaunes uses different ones
+    card_selector = "li.bi-item, li.bi, .bi-content"
     try:
         WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, ".bi-liste li.bi"))
+            EC.presence_of_element_located((By.CSS_SELECTOR, card_selector))
         )
     except Exception:
         print("  ⚠ No results found on this page (timeout waiting for cards)")
-        # Save a debug screenshot
-        debug_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", f"debug_page{page_num}.png")
-        os.makedirs(os.path.dirname(debug_path), exist_ok=True)
-        driver.save_screenshot(debug_path)
-        print(f"  📸 Debug screenshot saved to {debug_path}")
+        # Save debug info
+        debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        os.makedirs(debug_dir, exist_ok=True)
+        driver.save_screenshot(os.path.join(debug_dir, f"debug_page{page_num}.png"))
+        # Save page HTML so we can inspect what PagesJaunes actually returned
+        with open(os.path.join(debug_dir, f"debug_page{page_num}.html"), "w", encoding="utf-8") as f:
+            f.write(driver.page_source)
+        print(f"  📸 Debug screenshot + HTML saved to data/ folder")
+        print(f"  🔗 Current URL: {driver.current_url}")
         return []
 
-    # Handle cookie popup (only needed on first page)
-    dismiss_cookie_popup(driver)
-
     # Find all business cards
-    cards = driver.find_elements(By.CSS_SELECTOR, ".bi-liste li.bi")
-    if not cards:
-        cards = driver.find_elements(By.CSS_SELECTOR, "li.bi-item")
+    cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
 
     print(f"   Found {len(cards)} business cards")
 
