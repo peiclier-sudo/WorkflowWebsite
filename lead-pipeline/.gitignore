@@ -1,12 +1,5 @@
-.env
-token.json
-credentials.json
-*.log
-__pycache__/
 *.pyc
-previews/
-results_*.json
-.DS_Store
-*.egg-info/
-dist/
-.pytest_cache/
+__pycache__/
+data/leads.csv
+data/sites/*.html
+data/results.csv
