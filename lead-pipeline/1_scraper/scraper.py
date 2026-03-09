@@ -8,9 +8,9 @@ HOW IT WORKS:
   4. Keeps ONLY businesses that have an email but NO website
   5. Saves everything to data/leads.csv
 
-WHY PLAYWRIGHT (not httpx)?
+WHY SELENIUM (not simple HTTP requests)?
   PagesJaunes blocks simple HTTP requests (returns 403 Forbidden).
-  Playwright launches a REAL browser, so the website thinks a human is browsing.
+  Selenium launches a REAL browser, so the website thinks a human is browsing.
 """
 
 import csv
@@ -18,7 +18,12 @@ import os
 import time
 
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 # Go up one folder to find config.py
 import sys
@@ -37,39 +42,66 @@ def build_url(category, location, page=1):
     return f"{base}?quoiqui={category}&ou={location}&page={page}"
 
 
-def fetch_page(url, browser):
+def create_browser():
     """
-    Opens a URL in a real browser and returns the page HTML.
+    Creates an invisible Chrome browser.
 
     KEY CONCEPT — Headless Browser:
-      "Headless" means the browser window is invisible. It loads the page
-      exactly like Chrome would, but without showing anything on screen.
+      "Headless" means the browser window is invisible. Chrome loads the page
+      exactly like normal, but without showing anything on screen.
       The website sees a real browser visit, not a script.
+
+    KEY CONCEPT — Selenium + ChromeDriver:
+      Selenium is the "remote control". ChromeDriver is the "translator"
+      between Selenium and Chrome. Selenium tells ChromeDriver what to do,
+      ChromeDriver tells Chrome to do it.
+    """
+    chrome_options = Options()
+    chrome_options.add_argument("--headless=new")  # Invisible mode
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--lang=fr-FR")
+    chrome_options.add_argument(
+        "--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0.0.0 Safari/537.36"
+    )
+
+    try:
+        driver = webdriver.Chrome(options=chrome_options)
+        return driver
+    except Exception as e:
+        print(f"\n❌ Could not start Chrome browser: {e}")
+        print("\nTo fix this, make sure Google Chrome is installed on your PC.")
+        print("Selenium will automatically download ChromeDriver for you.")
+        return None
+
+
+def fetch_page(url, driver):
+    """
+    Opens a URL in the browser and returns the page HTML.
     """
     try:
-        # Create a new browser tab
-        page = browser.new_page()
+        driver.get(url)
 
-        # Go to the URL and wait until the page is fully loaded
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-
-        # Wait a moment for dynamic content to load
-        page.wait_for_timeout(2000)
-
-        # Handle cookie consent popup (PagesJaunes shows one)
+        # Wait for the page to load (wait until result cards appear or 10s timeout)
         try:
-            # Try clicking "Accept cookies" if the popup appears
-            accept_btn = page.locator("button#didomi-notice-agree-button")
-            if accept_btn.is_visible(timeout=3000):
-                accept_btn.click()
-                page.wait_for_timeout(1000)
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, ".bi-item, .bi"))
+            )
         except Exception:
-            pass  # No cookie popup, that's fine
+            pass  # Timeout — page may have no results
 
-        # Get the full page HTML
-        html = page.content()
-        page.close()
-        return html
+        # Handle cookie consent popup
+        try:
+            cookie_btn = driver.find_element(By.ID, "didomi-notice-agree-button")
+            cookie_btn.click()
+            time.sleep(1)
+        except Exception:
+            pass  # No cookie popup
+
+        return driver.page_source
 
     except Exception as e:
         print(f"  ⚠ Browser error: {e}")
@@ -129,12 +161,12 @@ def parse_listing(card):
     return info
 
 
-def scrape_page(url, browser):
+def scrape_page(url, driver):
     """
     Scrapes ONE page of PagesJaunes results.
     Returns a list of business dicts.
     """
-    html = fetch_page(url, browser)
+    html = fetch_page(url, driver)
     if not html:
         return []
 
@@ -145,7 +177,6 @@ def scrape_page(url, browser):
     # Each business result is inside a <li> with class "bi-item"
     cards = soup.select("li.bi-item")
     if not cards:
-        # Fallback: try alternative selectors
         cards = soup.select(".bi")
 
     results = []
@@ -182,11 +213,6 @@ def save_leads(leads, filepath):
 def run():
     """
     Main function — runs the full scraping process.
-
-    KEY CONCEPT — Context Manager (the "with" statement):
-      "with sync_playwright() as p" means: start Playwright, do our work,
-      then automatically clean up (close the browser) when we're done.
-      Even if an error occurs, the browser gets closed properly.
     """
     print("=" * 50)
     print(f"🔍 Searching PagesJaunes for: {config.SEARCH_CATEGORY}")
@@ -194,19 +220,20 @@ def run():
     print(f"📄 Pages to scrape: {config.MAX_PAGES}")
     print("=" * 50)
 
+    print("\n🌐 Launching Chrome browser...")
+    driver = create_browser()
+    if not driver:
+        return []
+
     all_leads = []
 
-    # Launch a real browser in the background
-    with sync_playwright() as p:
-        print("\n🌐 Launching browser...")
-        browser = p.chromium.launch(headless=True)
-
+    try:
         for page_num in range(1, config.MAX_PAGES + 1):
             url = build_url(config.SEARCH_CATEGORY, config.SEARCH_LOCATION, page_num)
             print(f"\n📄 Scraping page {page_num}/{config.MAX_PAGES}...")
             print(f"   URL: {url}")
 
-            page_results = scrape_page(url, browser)
+            page_results = scrape_page(url, driver)
             print(f"   Found {len(page_results)} businesses on this page")
 
             # Filter: keep only businesses WITH email and WITHOUT website
@@ -222,8 +249,9 @@ def run():
             if page_num < config.MAX_PAGES:
                 print("   ⏳ Waiting 2 seconds before next page...")
                 time.sleep(2)
-
-        browser.close()
+    finally:
+        # Always close the browser, even if an error occurs
+        driver.quit()
         print("\n🌐 Browser closed.")
 
     print(f"\n{'=' * 50}")

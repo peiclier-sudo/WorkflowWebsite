@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements.txt
 
 # Step 1: Scraper
-playwright==1.49.1     # Controls a real Chrome browser (bypasses anti-bot protection)
+selenium>=4.27.0       # Controls a real Chrome browser (bypasses anti-bot protection)
 beautifulsoup4==4.12.3 # Parses HTML to extract data (names, emails, etc.)
 
 # Step 2: Website Builder (coming soon)
