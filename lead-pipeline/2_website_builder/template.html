@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{BUSINESS_NAME}} — {{TAGLINE}}</title>
+    <style>
+        /* ── RESET & BASE ── */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            color: #333;
+            line-height: 1.6;
+        }
+
+        /* ── COLOR THEME (customized per lead) ── */
+        :root {
+            --primary: {{PRIMARY_COLOR}};
+            --primary-dark: {{PRIMARY_DARK}};
+            --accent: {{ACCENT_COLOR}};
+        }
+
+        /* ── HERO SECTION ── */
+        .hero {
+            background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+            color: white;
+            text-align: center;
+            padding: 80px 20px 60px;
+        }
+        .hero h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        .hero .tagline {
+            font-size: 1.3em;
+            opacity: 0.9;
+            margin-bottom: 30px;
+        }
+        .hero .cta-btn {
+            display: inline-block;
+            background: var(--accent);
+            color: white;
+            padding: 15px 40px;
+            border-radius: 8px;
+            text-decoration: none;
+            font-size: 1.1em;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        .hero .cta-btn:hover { transform: scale(1.05); }
+
+        /* ── SERVICES SECTION ── */
+        .services {
+            padding: 60px 20px;
+            max-width: 900px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .services h2 {
+            font-size: 2em;
+            margin-bottom: 40px;
+            color: var(--primary-dark);
+        }
+        .services-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 25px;
+        }
+        .service-card {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 30px 20px;
+            border-left: 4px solid var(--primary);
+        }
+        .service-card h3 {
+            color: var(--primary-dark);
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+        .service-card p { color: #555; }
+
+        /* ── ABOUT SECTION ── */
+        .about {
+            background: #f0f4f8;
+            padding: 60px 20px;
+            text-align: center;
+        }
+        .about .container {
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        .about h2 {
+            font-size: 2em;
+            margin-bottom: 20px;
+            color: var(--primary-dark);
+        }
+        .about p {
+            font-size: 1.1em;
+            color: #555;
+            margin-bottom: 15px;
+        }
+
+        /* ── CONTACT SECTION ── */
+        .contact {
+            padding: 60px 20px;
+            text-align: center;
+            background: var(--primary-dark);
+            color: white;
+        }
+        .contact h2 {
+            font-size: 2em;
+            margin-bottom: 30px;
+        }
+        .contact-info {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+            margin-bottom: 30px;
+        }
+        .contact-item {
+            font-size: 1.2em;
+        }
+        .contact-item a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        .contact-item span {
+            display: block;
+            font-size: 0.8em;
+            opacity: 0.7;
+            margin-bottom: 5px;
+        }
+
+        /* ── FOOTER ── */
+        .footer {
+            background: #1a1a2e;
+            color: rgba(255,255,255,0.5);
+            text-align: center;
+            padding: 20px;
+            font-size: 0.9em;
+        }
+
+        /* ── RESPONSIVE ── */
+        @media (max-width: 600px) {
+            .hero h1 { font-size: 1.8em; }
+            .hero .tagline { font-size: 1em; }
+            .contact-info { flex-direction: column; gap: 20px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- HERO -->
+    <section class="hero">
+        <h1>{{BUSINESS_NAME}}</h1>
+        <p class="tagline">{{TAGLINE}}</p>
+        <a href="tel:{{PHONE}}" class="cta-btn">📞 Appelez-nous : {{PHONE_DISPLAY}}</a>
+    </section>
+
+    <!-- SERVICES -->
+    <section class="services">
+        <h2>Nos Services</h2>
+        <div class="services-grid">
+            {{SERVICES_HTML}}
+        </div>
+    </section>
+
+    <!-- ABOUT -->
+    <section class="about">
+        <div class="container">
+            <h2>À Propos</h2>
+            {{ABOUT_HTML}}
+        </div>
+    </section>
+
+    <!-- CONTACT -->
+    <section class="contact">
+        <h2>Contactez-nous</h2>
+        <div class="contact-info">
+            <div class="contact-item">
+                <span>Téléphone</span>
+                <a href="tel:{{PHONE}}">{{PHONE_DISPLAY}}</a>
+            </div>
+            <div class="contact-item">
+                <span>Adresse</span>
+                {{ADDRESS}}
+            </div>
+            <div class="contact-item">
+                <span>Zone</span>
+                {{CITY}} et environs
+            </div>
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <div class="footer">
+        &copy; 2025 {{BUSINESS_NAME}} — Tous droits réservés
+    </div>
+
+</body>
+</html>

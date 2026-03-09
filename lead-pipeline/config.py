@@ -34,11 +34,14 @@ DEEPSEEK_API_KEY = ""  # Get from: platform.deepseek.com
 NETLIFY_API_TOKEN = ""  # Get from: app.netlify.com/user/applications
 
 # ──────────────────────────────────────────────
-# EMAIL SETTINGS (Step 4 — not used yet)
+# TWILIO SMS SETTINGS (Step 4)
 # ──────────────────────────────────────────────
+# Sign up free at: https://www.twilio.com
+# Free trial gives ~€13 credit (~185 SMS to France)
 
-GMAIL_ADDRESS = ""      # Your Gmail address
-GMAIL_APP_PASSWORD = ""  # NOT your Gmail password! See README for how to get this.
+TWILIO_ACCOUNT_SID = ""   # Starts with "AC..."
+TWILIO_AUTH_TOKEN = ""     # Found on Twilio dashboard
+TWILIO_PHONE_NUMBER = ""   # Your Twilio phone number (e.g. "+33xxxxxxxxx")
 
 # ──────────────────────────────────────────────
 # FILE PATHS (don't change unless you know why)

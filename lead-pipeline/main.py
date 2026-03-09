@@ -33,7 +33,8 @@ def main():
         run_scraper()
 
     elif command == "build":
-        print("🚧 Step 2 (website builder) not built yet!")
+        from builder_module import run_builder
+        run_builder()
 
     elif command == "deploy":
         print("🚧 Step 3 (deployer) not built yet!")
@@ -73,8 +74,17 @@ class scraper_module:
         spec = import_module("1_scraper.scraper")
         spec.run()
 
-# Make the wrapper importable
+class builder_module:
+    @staticmethod
+    def run_builder():
+        _setup_path()
+        from importlib import import_module
+        spec = import_module("2_website_builder.builder")
+        spec.run()
+
+# Make the wrappers importable
 sys.modules["scraper_module"] = scraper_module
+sys.modules["builder_module"] = builder_module
 
 
 if __name__ == "__main__":

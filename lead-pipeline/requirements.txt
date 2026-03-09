@@ -5,11 +5,11 @@
 selenium>=4.27.0       # Controls a real Chrome browser (bypasses anti-bot protection)
 beautifulsoup4==4.12.3 # Parses HTML to extract data (names, emails, etc.)
 
-# Step 2: Website Builder (coming soon)
-# openai                # Used to talk to DeepSeek API
+# Step 2: Website Builder
+requests>=2.31.0       # For calling DeepSeek API (simpler than openai package)
 
 # Step 3: Deployer (coming soon)
 # httpx                 # For API calls to Netlify
 
-# Step 4: Emailer (coming soon)
-# (uses Python's built-in email library, no extra install)
+# Step 4: SMS Sender (Twilio)
+# twilio>=9.0.0         # For sending SMS to leads
