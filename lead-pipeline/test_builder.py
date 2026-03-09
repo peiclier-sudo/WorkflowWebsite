@@ -4,9 +4,13 @@ Run: python test_builder.py
 """
 import sys
 import os
+import importlib
+
+# Add current dir to path so config.py is found
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from _2_website_builder import builder
+# Can't use normal import because folder starts with a number
+builder = importlib.import_module("2_website_builder.builder")
 
 # Fake lead with enriched data
 fake_lead = {
