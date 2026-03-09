@@ -2,22 +2,25 @@
 SCRAPER — Finds businesses on PagesJaunes that have NO website.
 
 HOW IT WORKS:
-  1. Builds a search URL for pagesjaunes.fr (like typing in their search bar)
-  2. Downloads each results page
+  1. Opens a real Chrome browser (invisible, in the background)
+  2. Navigates to pagesjaunes.fr and searches for businesses
   3. For each business on the page, extracts: name, phone, email, address
   4. Keeps ONLY businesses that have an email but NO website
   5. Saves everything to data/leads.csv
+
+WHY PLAYWRIGHT (not httpx)?
+  PagesJaunes blocks simple HTTP requests (returns 403 Forbidden).
+  Playwright launches a REAL browser, so the website thinks a human is browsing.
 """
 
 import csv
 import os
 import time
 
-import httpx
 from bs4 import BeautifulSoup
+from playwright.sync_api import sync_playwright
 
 # Go up one folder to find config.py
-# "sys.path" tells Python where to look for files to import
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import config
@@ -34,37 +37,43 @@ def build_url(category, location, page=1):
     return f"{base}?quoiqui={category}&ou={location}&page={page}"
 
 
-def fetch_page(url):
+def fetch_page(url, browser):
     """
-    Downloads a web page and returns the HTML text.
+    Opens a URL in a real browser and returns the page HTML.
 
-    KEY CONCEPT — HTTP Headers:
-      Websites can block "robots" (scripts). By sending a "User-Agent" header,
-      we tell the site "I'm a normal browser", not "I'm a Python script".
-      This is standard practice for scraping.
+    KEY CONCEPT — Headless Browser:
+      "Headless" means the browser window is invisible. It loads the page
+      exactly like Chrome would, but without showing anything on screen.
+      The website sees a real browser visit, not a script.
     """
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/120.0.0.0 Safari/537.36"
-        ),
-        "Accept-Language": "fr-FR,fr;q=0.9",
-    }
-
     try:
-        response = httpx.get(url, headers=headers, follow_redirects=True, timeout=30)
-    except httpx.HTTPError as e:
-        print(f"  ⚠ Network error: {e}")
-        print("    Make sure you have internet access and try again.")
-        return None
+        # Create a new browser tab
+        page = browser.new_page()
 
-    # "status_code 200" = success, anything else = problem
-    if response.status_code != 200:
-        print(f"  ⚠ Page returned status {response.status_code}, skipping.")
-        return None
+        # Go to the URL and wait until the page is fully loaded
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
 
-    return response.text
+        # Wait a moment for dynamic content to load
+        page.wait_for_timeout(2000)
+
+        # Handle cookie consent popup (PagesJaunes shows one)
+        try:
+            # Try clicking "Accept cookies" if the popup appears
+            accept_btn = page.locator("button#didomi-notice-agree-button")
+            if accept_btn.is_visible(timeout=3000):
+                accept_btn.click()
+                page.wait_for_timeout(1000)
+        except Exception:
+            pass  # No cookie popup, that's fine
+
+        # Get the full page HTML
+        html = page.content()
+        page.close()
+        return html
+
+    except Exception as e:
+        print(f"  ⚠ Browser error: {e}")
+        return None
 
 
 def parse_listing(card):
@@ -78,7 +87,6 @@ def parse_listing(card):
 
     Returns a dict like:
       {"name": "Boulangerie Dupont", "phone": "01 23 45 67 89", ...}
-    or None if the business has a website (we don't want those).
     """
     info = {
         "name": "",
@@ -121,22 +129,20 @@ def parse_listing(card):
     return info
 
 
-def scrape_page(url):
+def scrape_page(url, browser):
     """
     Scrapes ONE page of PagesJaunes results.
     Returns a list of business dicts.
     """
-    html = fetch_page(url)
+    html = fetch_page(url, browser)
     if not html:
         return []
 
     # KEY CONCEPT — BeautifulSoup:
     # Turns raw HTML text into a searchable tree structure.
-    # "html.parser" is the built-in Python parser (no extra install needed).
     soup = BeautifulSoup(html, "html.parser")
 
     # Each business result is inside a <li> with class "bi-item"
-    # (this may change if PagesJaunes updates their site)
     cards = soup.select("li.bi-item")
     if not cards:
         # Fallback: try alternative selectors
@@ -158,7 +164,6 @@ def save_leads(leads, filepath):
     KEY CONCEPT — CSV:
       CSV = "Comma-Separated Values". It's the simplest spreadsheet format.
       You can open it in Excel, Google Sheets, or any text editor.
-      Each line is one business. Columns are separated by commas.
     """
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
 
@@ -166,9 +171,8 @@ def save_leads(leads, filepath):
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()  # Writes the column names as first line
+        writer.writeheader()
         for lead in leads:
-            # Only write the fields we care about (skip has_website)
             row = {k: lead[k] for k in fieldnames}
             writer.writerow(row)
 
@@ -179,7 +183,10 @@ def run():
     """
     Main function — runs the full scraping process.
 
-    This is what gets called when you run the scraper.
+    KEY CONCEPT — Context Manager (the "with" statement):
+      "with sync_playwright() as p" means: start Playwright, do our work,
+      then automatically clean up (close the browser) when we're done.
+      Even if an error occurs, the browser gets closed properly.
     """
     print("=" * 50)
     print(f"🔍 Searching PagesJaunes for: {config.SEARCH_CATEGORY}")
@@ -189,27 +196,35 @@ def run():
 
     all_leads = []
 
-    for page_num in range(1, config.MAX_PAGES + 1):
-        url = build_url(config.SEARCH_CATEGORY, config.SEARCH_LOCATION, page_num)
-        print(f"\n📄 Scraping page {page_num}/{config.MAX_PAGES}...")
-        print(f"   URL: {url}")
+    # Launch a real browser in the background
+    with sync_playwright() as p:
+        print("\n🌐 Launching browser...")
+        browser = p.chromium.launch(headless=True)
 
-        page_results = scrape_page(url)
-        print(f"   Found {len(page_results)} businesses on this page")
+        for page_num in range(1, config.MAX_PAGES + 1):
+            url = build_url(config.SEARCH_CATEGORY, config.SEARCH_LOCATION, page_num)
+            print(f"\n📄 Scraping page {page_num}/{config.MAX_PAGES}...")
+            print(f"   URL: {url}")
 
-        # Filter: keep only businesses WITH email and WITHOUT website
-        qualified = []
-        for biz in page_results:
-            if biz["email"] and not biz["has_website"]:
-                qualified.append(biz)
+            page_results = scrape_page(url, browser)
+            print(f"   Found {len(page_results)} businesses on this page")
 
-        print(f"   ✅ {len(qualified)} qualified (has email, no website)")
-        all_leads.extend(qualified)
+            # Filter: keep only businesses WITH email and WITHOUT website
+            qualified = []
+            for biz in page_results:
+                if biz["email"] and not biz["has_website"]:
+                    qualified.append(biz)
 
-        # Be polite: wait between requests so we don't overload the site
-        if page_num < config.MAX_PAGES:
-            print("   ⏳ Waiting 2 seconds before next page...")
-            time.sleep(2)
+            print(f"   ✅ {len(qualified)} qualified (has email, no website)")
+            all_leads.extend(qualified)
+
+            # Be polite: wait between requests
+            if page_num < config.MAX_PAGES:
+                print("   ⏳ Waiting 2 seconds before next page...")
+                time.sleep(2)
+
+        browser.close()
+        print("\n🌐 Browser closed.")
 
     print(f"\n{'=' * 50}")
     print(f"📊 Total qualified leads: {len(all_leads)}")
@@ -222,7 +237,5 @@ def run():
     return all_leads
 
 
-# This runs the scraper when you execute this file directly:
-#   python 1_scraper/scraper.py
 if __name__ == "__main__":
     run()

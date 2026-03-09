@@ -2,14 +2,14 @@
 # Install with: pip install -r requirements.txt
 
 # Step 1: Scraper
-httpx==0.27.0          # Downloads web pages (like a browser without the visuals)
+playwright==1.49.1     # Controls a real Chrome browser (bypasses anti-bot protection)
 beautifulsoup4==4.12.3 # Parses HTML to extract data (names, emails, etc.)
 
 # Step 2: Website Builder (coming soon)
 # openai                # Used to talk to DeepSeek API
 
 # Step 3: Deployer (coming soon)
-# (uses httpx, already installed)
+# httpx                 # For API calls to Netlify
 
 # Step 4: Emailer (coming soon)
 # (uses Python's built-in email library, no extra install)
