@@ -159,6 +159,14 @@ def scrape_page(url, driver, page_num):
                 pass
         time.sleep(1)
 
+    # DEBUG: Save first card's HTML so we can see the real structure
+    if cards and page_num == 1:
+        debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+        os.makedirs(debug_dir, exist_ok=True)
+        with open(os.path.join(debug_dir, "debug_card.html"), "w", encoding="utf-8") as f:
+            f.write(cards[0].get_attribute("outerHTML"))
+        print("   🔍 DEBUG: First card HTML saved to data/debug_card.html")
+
     # --- Step 2: Now extract data from each card ---
     results = []
     for card in cards:
