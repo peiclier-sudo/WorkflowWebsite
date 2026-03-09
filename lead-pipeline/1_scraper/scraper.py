@@ -4,18 +4,19 @@ SCRAPER — Finds businesses on PagesJaunes that have NO website.
 HOW IT WORKS:
   1. Opens a real Chrome browser (invisible, in the background)
   2. Navigates to pagesjaunes.fr and searches for businesses
-  3. For each business card, clicks "Email" button to reveal hidden email
-  4. Keeps ONLY businesses that have an email but NO website
-  5. Saves everything to data/leads.csv
+  3. Clicks "Afficher le N°" buttons to reveal hidden phone numbers
+  4. Extracts: name, phone, address for each business
+  5. Keeps ONLY businesses that have NO website
+  6. Saves everything to data/leads.csv
 
 WHY SELENIUM (not simple HTTP requests)?
   PagesJaunes blocks simple HTTP requests (returns 403 Forbidden).
   Selenium launches a REAL browser, so the website thinks a human is browsing.
 
-WHY CLICK EMAIL BUTTONS?
-  PagesJaunes hides emails behind a button click. The email is NOT in the
-  initial HTML — it's loaded dynamically when you click "E-mail".
-  We must use Selenium to click each button and wait for the email to appear.
+WHY CLICK PHONE BUTTONS?
+  PagesJaunes hides phone numbers behind "Afficher le N°" buttons.
+  The number only appears in the HTML after clicking. Same concept as
+  a "Show phone number" button on any website.
 """
 
 import csv
@@ -40,7 +41,7 @@ def build_url(category, location, page=1):
     Builds the PagesJaunes search URL.
 
     Example result:
-      https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=boulangerie&ou=Paris&page=1
+      https://www.pagesjaunes.fr/annuaire/chercherlespros?quoiqui=plombier&ou=Paris&page=1
     """
     base = "https://www.pagesjaunes.fr/annuaire/chercherlespros"
     return f"{base}?quoiqui={category}&ou={location}&page={page}"
@@ -91,12 +92,12 @@ def dismiss_cookie_popup(driver):
 
 def scrape_page(url, driver, page_num):
     """
-    Scrapes ONE page of PagesJaunes results using Selenium directly.
+    Scrapes ONE page of PagesJaunes results using Selenium.
 
     KEY CONCEPT — Dynamic Content:
-      PagesJaunes loads emails only when you click the "E-mail" button.
-      So we can't just read the HTML — we must interact with the page
-      like a real user would: click buttons, wait for content to appear.
+      PagesJaunes hides phone numbers behind "Afficher le N°" buttons.
+      We must click each button, then read the revealed number from
+      a hidden <div> that becomes visible.
 
     Returns a list of business dicts.
     """
@@ -110,64 +111,43 @@ def scrape_page(url, driver, page_num):
     dismiss_cookie_popup(driver)
 
     # Wait for business cards to appear
-    # Try multiple selectors — PagesJaunes uses different ones
-    card_selector = "li.bi-item, li.bi, .bi-content"
+    card_selector = "li.bi"
     try:
         WebDriverWait(driver, 10).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, card_selector))
         )
     except Exception:
-        print("  ⚠ No results found on this page (timeout waiting for cards)")
-        # Save debug info
+        print("  ⚠ No results found on this page (timeout)")
         debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
         os.makedirs(debug_dir, exist_ok=True)
         driver.save_screenshot(os.path.join(debug_dir, f"debug_page{page_num}.png"))
-        # Save page HTML so we can inspect what PagesJaunes actually returned
         with open(os.path.join(debug_dir, f"debug_page{page_num}.html"), "w", encoding="utf-8") as f:
             f.write(driver.page_source)
-        print(f"  📸 Debug screenshot + HTML saved to data/ folder")
-        print(f"  🔗 Current URL: {driver.current_url}")
+        print(f"  📸 Debug files saved to data/")
         return []
 
     # Find all business cards
     cards = driver.find_elements(By.CSS_SELECTOR, card_selector)
-
     print(f"   Found {len(cards)} business cards")
 
-    # --- Step 1: Click ALL "E-mail" buttons to reveal hidden emails ---
-    # KEY CONCEPT: PagesJaunes hides emails. Each card has an "E-mail" button.
-    # When clicked, it loads the actual email address via JavaScript.
-    # We click all buttons first, then extract data after.
-
-    # --- Step 1: Try to click email buttons to reveal hidden emails ---
-    # PagesJaunes sometimes hides emails behind buttons.
-    # Not all categories have email buttons (bakeries don't, plumbers often do).
-    email_buttons = driver.find_elements(By.CSS_SELECTOR,
-        "a[title*='E-mail'], a[title*='email'], a[title*='Mail'], "
-        "a.pj-link--email, a[data-type='email'], a[href*='mail'], "
-        "a.bi-mail, a.bi-email"
-    )
-    if email_buttons:
-        print(f"   📧 Found {len(email_buttons)} email buttons — clicking them...")
-        for btn in email_buttons:
+    # --- Step 1: Click ALL "Afficher le N°" buttons to reveal phone numbers ---
+    # KEY CONCEPT: PagesJaunes hides phone numbers. Each card has a button
+    # with class "btn_tel". Clicking it reveals a hidden div (class "bi-fantomas")
+    # containing the actual phone number inside ".number-contact".
+    phone_buttons = driver.find_elements(By.CSS_SELECTOR, "button.btn_tel")
+    if phone_buttons:
+        print(f"   📞 Clicking {len(phone_buttons)} phone buttons...")
+        for btn in phone_buttons:
             try:
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
-                time.sleep(0.2)
+                time.sleep(0.1)
                 driver.execute_script("arguments[0].click();", btn)
-                time.sleep(0.3)
+                time.sleep(0.2)
             except Exception:
                 pass
-        time.sleep(1)
+        time.sleep(0.5)
 
-    # DEBUG: Save first card's HTML so we can see the real structure
-    if cards and page_num == 1:
-        debug_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-        os.makedirs(debug_dir, exist_ok=True)
-        with open(os.path.join(debug_dir, "debug_card.html"), "w", encoding="utf-8") as f:
-            f.write(cards[0].get_attribute("outerHTML"))
-        print("   🔍 DEBUG: First card HTML saved to data/debug_card.html")
-
-    # --- Step 2: Now extract data from each card ---
+    # --- Step 2: Extract data from each card ---
     results = []
     for card in cards:
         info = extract_card_data(card)
@@ -181,8 +161,12 @@ def extract_card_data(card):
     """
     Extracts business info from ONE card element using Selenium.
 
-    This runs AFTER we've clicked all email buttons, so any revealed
-    emails should now be visible in the DOM.
+    The actual PagesJaunes HTML structure (as of 2025):
+      - Name:    <h3> inside <a class="bi-denomination">
+      - Address: <div class="bi-address"> containing an <a> with the text
+      - Phone:   <div class="bi-fantomas"> > <div class="number-contact">
+                 (only visible after clicking "Afficher le N°")
+      - Website: <a> with "site internet" or "website" in the link
     """
     info = {
         "name": "",
@@ -194,41 +178,49 @@ def extract_card_data(card):
         "has_website": False,
     }
 
-    # --- Business name ---
+    # --- Business name (inside h3 within .bi-denomination link) ---
     try:
-        name_el = card.find_element(By.CSS_SELECTOR, ".bi-denomination, .denomination-links, h2, h3")
+        name_el = card.find_element(By.CSS_SELECTOR, "h3")
         info["name"] = name_el.text.strip()
     except Exception:
         pass
 
-    # --- Phone number ---
+    # --- Phone number (revealed after clicking "Afficher le N°") ---
+    # The phone appears in: <div class="bi-fantomas"><div class="number-contact">
+    # Text looks like: "Tél : 01 84 83 14 68"
     try:
-        phone_el = card.find_element(By.CSS_SELECTOR, ".bi-phone .coord-value, [class*='phone'] .coord-value, .tel-value")
-        info["phone"] = phone_el.text.strip()
-    except Exception:
-        # Try data attribute
-        try:
-            phone_el = card.find_element(By.CSS_SELECTOR, "[data-phone]")
-            info["phone"] = phone_el.get_attribute("data-phone") or phone_el.text.strip()
-        except Exception:
-            pass
-
-    # --- Address ---
-    try:
-        addr_el = card.find_element(By.CSS_SELECTOR, ".bi-address, .address-container")
-        info["address"] = addr_el.text.strip()
+        phone_el = card.find_element(By.CSS_SELECTOR, ".number-contact")
+        phone_text = phone_el.text.strip()
+        # Extract just the number: remove "Tél :" prefix
+        phone_clean = re.sub(r'^.*?:\s*', '', phone_text).strip()
+        if phone_clean:
+            info["phone"] = phone_clean
     except Exception:
         pass
 
-    # --- Website (we want businesses WITHOUT one) ---
+    # --- Address (inside .bi-address) ---
+    # Text looks like: "3 rue Janssen 75019 Paris\nVoir le plan"
     try:
-        card.find_element(By.CSS_SELECTOR, "a.bi-website, a[class*='website'], .pj-link--website")
-        info["has_website"] = True
+        addr_el = card.find_element(By.CSS_SELECTOR, ".bi-address")
+        addr_text = addr_el.text.strip()
+        # Remove "Voir le plan" suffix
+        addr_text = addr_text.replace("Voir le plan", "").strip()
+        info["address"] = addr_text
     except Exception:
-        pass  # No website link found — good!
+        pass
 
-    # --- Email (should be visible now after clicking the button) ---
-    # Look for mailto: links that appeared after clicking
+    # --- Website detection ---
+    # Paid listings have website links. We look for any link containing
+    # "site internet" or website-related attributes.
+    try:
+        # Check for site internet link in the card's actions
+        card_html = card.get_attribute("innerHTML").lower()
+        if "site internet" in card_html or "bi-website" in card_html or "visiter le site" in card_html:
+            info["has_website"] = True
+    except Exception:
+        pass
+
+    # --- Email (rare on search results, but check anyway) ---
     try:
         email_el = card.find_element(By.CSS_SELECTOR, "a[href^='mailto:']")
         href = email_el.get_attribute("href") or ""
@@ -236,7 +228,7 @@ def extract_card_data(card):
     except Exception:
         pass
 
-    # Also check the card's inner HTML for email patterns (backup method)
+    # Regex fallback for email
     if not info["email"]:
         try:
             card_html = card.get_attribute("innerHTML")
@@ -300,8 +292,9 @@ def run():
             # These are our potential clients — they need a website!
             qualified = [biz for biz in page_results if not biz["has_website"]]
             with_email = [biz for biz in qualified if biz["email"]]
+            with_phone = [biz for biz in qualified if biz["phone"]]
 
-            print(f"   📊 {len(qualified)} without website ({len(with_email)} also have email)")
+            print(f"   📊 {len(qualified)} without website, {len(with_phone)} with phone, {len(with_email)} with email")
             all_leads.extend(qualified)
 
             # Be polite: wait between requests
@@ -317,8 +310,8 @@ def run():
     print(f"📊 Total leads (no website): {len(all_leads)}")
     with_email_total = sum(1 for l in all_leads if l["email"])
     with_phone_total = sum(1 for l in all_leads if l["phone"])
-    print(f"   📧 With email: {with_email_total}")
     print(f"   📞 With phone: {with_phone_total}")
+    print(f"   📧 With email: {with_email_total}")
 
     if all_leads:
         save_leads(all_leads, config.LEADS_CSV)
