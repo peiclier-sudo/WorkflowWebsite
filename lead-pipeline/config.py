@@ -11,7 +11,9 @@ HOW TO USE:
 # ──────────────────────────────────────────────
 
 # What type of business to search for
-SEARCH_CATEGORY = "boulangerie"
+# TIP: Service businesses (plombier, electricien, serrurier, avocat, comptable)
+#      are more likely to have email addresses listed than food businesses.
+SEARCH_CATEGORY = "plombier"
 
 # Where to search (city or department)
 SEARCH_LOCATION = "Paris"
