@@ -212,6 +212,31 @@ def extract_card_data(card):
     return info
 
 
+def _is_real_email(email):
+    """
+    Returns False for placeholder/template emails found in PagesJaunes HTML.
+
+    PagesJaunes pages contain fake example emails like "nom@mail.fr" in
+    their HTML templates. We filter those out so we only keep real
+    business emails.
+    """
+    lower = email.lower().strip()
+    # PagesJaunes internal / template domains
+    blacklist = [
+        "pagesjaunes", "solocal", "didomi",  # PJ internal
+        "mail.fr", "example.", "test.",       # Placeholder domains
+        "email.fr", "adresse.fr",             # Generic placeholders
+    ]
+    for word in blacklist:
+        if word in lower:
+            return False
+    # Must have at least 2 chars before @ (filters out "a@b.fr" type junk)
+    local_part = lower.split("@")[0]
+    if len(local_part) < 3:
+        return False
+    return True
+
+
 def fetch_email_from_detail_page(driver, detail_url, business_name):
     """
     Visits a business's detail page on PagesJaunes to find their email.
@@ -248,19 +273,16 @@ def fetch_email_from_detail_page(driver, detail_url, business_name):
             mailto_el = driver.find_element(By.CSS_SELECTOR, "a[href^='mailto:']")
             href = mailto_el.get_attribute("href") or ""
             email = href.replace("mailto:", "").split("?")[0].strip()
-            if email:
+            if email and _is_real_email(email):
                 return email
         except Exception:
             pass
 
         # Method 3: Regex scan of page for email patterns
         page_html = driver.page_source
-        # Look for email addresses, excluding common false positives
         emails = re.findall(r'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}', page_html)
-        # Filter out PagesJaunes internal emails and tracking pixels
         for email in emails:
-            lower = email.lower()
-            if "pagesjaunes" not in lower and "solocal" not in lower and "didomi" not in lower:
+            if _is_real_email(email):
                 return email
 
     except Exception as e:
