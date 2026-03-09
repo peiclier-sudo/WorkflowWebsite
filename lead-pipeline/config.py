@@ -19,7 +19,7 @@ SEARCH_CATEGORY = "plombier"
 SEARCH_LOCATION = "Paris"
 
 # How many pages of results to scrape (each page ~ 20 businesses)
-MAX_PAGES = 3
+MAX_PAGES = 10
 
 # ──────────────────────────────────────────────
 # DEEPSEEK AI SETTINGS (Step 2 — not used yet)
