@@ -139,9 +139,64 @@ def scrape_page(url, driver, page_num):
     # When clicked, it loads the actual email address via JavaScript.
     # We click all buttons first, then extract data after.
 
-    email_buttons = driver.find_elements(By.CSS_SELECTOR, "a[title*='E-mail'], a[title*='email'], a.pj-link--email")
+    # DEBUG: Find all links/buttons that might be email-related
+    # Search broadly for anything containing "mail" in class, title, href, or text
+    debug_elements = driver.execute_script("""
+        var results = [];
+        var all = document.querySelectorAll('a, button, span');
+        for (var i = 0; i < all.length && results.length < 20; i++) {
+            var el = all[i];
+            var text = (el.textContent || '').trim().toLowerCase();
+            var cls = (el.className || '').toLowerCase();
+            var title = (el.getAttribute('title') || '').toLowerCase();
+            var href = (el.getAttribute('href') || '').toLowerCase();
+            if (text.includes('mail') || cls.includes('mail') || title.includes('mail') || href.includes('mail')) {
+                results.push({
+                    tag: el.tagName,
+                    text: (el.textContent || '').trim().substring(0, 50),
+                    class: el.className,
+                    title: el.getAttribute('title'),
+                    href: el.getAttribute('href'),
+                    dataType: el.getAttribute('data-type')
+                });
+            }
+        }
+        return results;
+    """)
+    if debug_elements:
+        print(f"   🔍 DEBUG — Found {len(debug_elements)} email-related elements:")
+        for el in debug_elements[:5]:
+            print(f"      <{el['tag']}> class=\"{el['class']}\" title=\"{el['title']}\" href=\"{el['href']}\" data-type=\"{el['dataType']}\" text=\"{el['text']}\"")
+    else:
+        print("   🔍 DEBUG — No elements with 'mail' found anywhere on page")
+
+    # Try broad selectors to find email buttons
+    email_selectors = [
+        "a[title*='E-mail']", "a[title*='email']", "a[title*='Mail']",
+        "a.pj-link--email", "a[data-type='email']",
+        "a[href*='mail']", "button[class*='mail']",
+        "a.bi-mail", "a.bi-email",
+        ".bi-actions a",  # action buttons on each card
+    ]
+    email_buttons = []
+    for sel in email_selectors:
+        found = driver.find_elements(By.CSS_SELECTOR, sel)
+        if found:
+            print(f"   📧 Selector '{sel}' matched {len(found)} elements")
+            email_buttons.extend(found)
+
+    # Deduplicate
+    seen_ids = set()
+    unique_buttons = []
+    for btn in email_buttons:
+        btn_id = btn.id or id(btn)
+        if btn_id not in seen_ids:
+            seen_ids.add(btn_id)
+            unique_buttons.append(btn)
+    email_buttons = unique_buttons
+
     if email_buttons:
-        print(f"   📧 Found {len(email_buttons)} email buttons — clicking them...")
+        print(f"   📧 Clicking {len(email_buttons)} email buttons...")
         for btn in email_buttons:
             try:
                 driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", btn)
@@ -150,7 +205,6 @@ def scrape_page(url, driver, page_num):
                 time.sleep(0.3)
             except Exception:
                 pass
-        # Wait a moment for all emails to load
         time.sleep(1)
     else:
         print("   📧 No email buttons found on this page")
